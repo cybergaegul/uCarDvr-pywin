@@ -1,0 +1,5 @@
+# xufs_player / xufs_probe 용 (xufs_lib.py는 표준 라이브러리만 사용)
+opencv-python>=4.10
+numpy>=2.0
+
+# 오디오 출력은 Windows 내장 API(winmm)를 직접 사용 — 추가 패키지가 필요 없다
