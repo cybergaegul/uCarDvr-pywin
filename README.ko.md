@@ -60,7 +60,7 @@ elen1 섹터 0에 기록하는 **모션 JPEG(1280×720)** 를 폴링해 받는�
 | `xufs_lib.py` | 공통 라이브러리 — elen1 탐색, FAT LCN→LBA 매핑, SCSI READ(10) 패스스루, 니블 신호, 프레임/응답 파싱, 재생 스트림 캡처, MJPEG AVI 작성(오디오 뮥싱 포함) |
 | `xufs_player.py` | **통합 GUI** — 탭 1 [라이브 뷰]: 실시간 화면·스냅샷·로컬 녹화 / 탭 2 [녹화 탐색]: SD 목록(정렬)·재생(소리·볼륨·시크·반복·자동재생)·삭제·보호·다운로드 |
 | `xufs_probe.py` | 진단 도구 — BPB/루트 덴트리 검증, 전체 명령 시퀀스, 광역 변화 감시 (`--scsi`) |
-| `PROTOCOL.md` | 프로토콜 명세 (실측 검증 기반.) |
+| `PROTOCOL.ko.md` | 한국어 프로토콜 명세 (실측 검증 기반.) |
 
 오디오 출력은 Windows 내장 API(winmm waveOut)를 직접 사용 — 재생에 필요한 패키지는 `opencv-python`과 `numpy`뿐이다.
 
