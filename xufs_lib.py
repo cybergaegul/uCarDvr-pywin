@@ -19,6 +19,8 @@ import struct
 import sys
 import time
 
+from i18n import T
+
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 GENERIC_READ = 0x80000000
@@ -197,8 +199,8 @@ class ScsiVolumeReader:
                 if self.read_absolute(cand * 512, 512) == ref:
                     self.partition_start = cand
                     if verbose:
-                        print(f"[i] SCSI 대상 확정: PhysicalDrive{n} "
-                              f"({size/1e9:.2f}GB), 파티션 시작 LBA {cand}({cand:#x})")
+                        print(T("[i] SCSI target: PhysicalDrive{n} ({gb:.2f}GB), partition start LBA {lba}({hx})")
+                              .format(n=n, gb=size / 1e9, lba=cand, hx=f"{cand:#x}"))
                     return True
             # 선형 스캔 (최대 64KB 영역)
             if size >= 0 and 64 * 1024 * 1024 < size < 8 * 1024**3:  # 카메라급 크기만
@@ -206,8 +208,8 @@ class ScsiVolumeReader:
                     if self.read_absolute(lba * 512, 512) == ref:
                         self.partition_start = lba
                         if verbose:
-                            print(f"[i] SCSI 대상 확정(스캔): PhysicalDrive{n}, "
-                                  f"파티션 시작 LBA {lba}({lba:#x})")
+                            print(T("[i] SCSI target (scan): PhysicalDrive{n}, partition start LBA {lba}({hx})")
+                                  .format(n=n, lba=lba, hx=f"{lba:#x}"))
                         return True
             return False
         except OSError:
@@ -411,21 +413,21 @@ class XufsCamera:
     def __init__(self, drive_letter=None, verbose=True, use_scsi=False):
         cands = find_elen1_drives()
         if not cands:
-            raise RuntimeError(
-                "elen1(307200B)을 가진 드라이브를 찾지 못했습니다. "
-                "카메라가 연결·마운트되었는지 확인하세요.")
+            raise RuntimeError(T(
+                "No drive containing an elen1 file was found. "
+                "Check the camera connection and mounting."))
         if drive_letter:
             cands = [c for c in cands if c[0].lower() == drive_letter.lower()] or cands
         self.letter, self.path, _ = cands[0]
         if verbose:
-            print(f"[i] 카메라 발견: {self.path} (드라이브 {self.letter}:)")
+            print(T("[i] Camera found: {p} (drive {l}:)").format(p=self.path, l=self.letter))
         self.map = Elen1Map(self.path)
         if verbose:
             print(self.map.describe())
         self.vol = ScsiVolumeReader(self.letter) if use_scsi else RawVolume(self.letter)
         if verbose and use_scsi:
-            print(f"[i] SCSI 패스스루 모드 (PhysicalDrive{self.vol.device_number}, "
-                  f"파티션 시작 {self.vol.partition_start:#x})")
+            print(T("[i] SCSI passthrough mode (PhysicalDrive{n}, partition start {hx})")
+                  .format(n=self.vol.device_number, hx=f"{self.vol.partition_start:#x}"))
         self.verbose = verbose
 
     def close(self):

@@ -26,6 +26,8 @@ import cv2
 import numpy as np
 
 import xufs_lib as X
+import i18n
+from i18n import T
 
 import ctypes
 
@@ -76,14 +78,14 @@ class _WinAudioOut:
 
     def __init__(self, rate, channels=1):
         if _winmm is None:
-            raise OSError("winmm 사용 불가")
+            raise OSError(T("winmm unavailable"))
         fmt = _WAVEFORMATEX(0x0001, channels, rate, rate * 2 * channels,
                             2 * channels, 16, 0)
         self._h = ctypes.c_void_p()
         rc = _winmm.waveOutOpen(ctypes.byref(self._h), _WAVE_MAPPER,
                                 ctypes.byref(fmt), 0, 0, 0)   # CALLBACK_NULL
         if rc != 0:
-            raise OSError(f"waveOutOpen 실패 (코드 {rc})")
+            raise OSError(T("waveOutOpen failed (code {rc})").format(rc=rc))
         self._slots = [[_WAVEHDR(), None, False] for _ in range(self.N_BUF)]
 
     def write(self, data):
@@ -105,7 +107,7 @@ class _WinAudioOut:
                       and _winmm.waveOutWrite(self._h, ctypes.byref(h),
                                               ctypes.sizeof(h)) == 0)
                 if not ok:
-                    raise OSError("waveOut 버퍼 출력 실패")
+                    raise OSError(T("waveOut write failed"))
                 slot[1] = buf
                 slot[2] = True
                 return
@@ -218,8 +220,8 @@ class Session(threading.Thread):
             try:
                 self.cam = X.XufsCamera()
             except Exception as e:
-                self.post("fatal", "카메라(elen1 드라이브)를 찾지 못했습니다. "
-                          "USB 연결·전원·관리자 권한 확인. " f"상세: {e}")
+                self.post("fatal", T("Camera (elen1 drive) not found. Check the USB "
+                          "connection, power and administrator rights. Details: {e}").format(e=e))
                 self.state = "dead"
                 return
         # 출력 스트림은 첫 오디오 청크가 필요할 때 연다 (_open_audio) — 장치가 바뀌어도
@@ -231,7 +233,7 @@ class Session(threading.Thread):
             self.cam.stop_playback()        # 잔여 재생 정리
             self.cam.sync_datetime()
         except OSError as e:
-            self.post("fatal", f"초기화 실패: {e}")
+            self.post("fatal", T("Init failed: {e}").format(e=e))
             self.state = "dead"
             return
         self.state = "idle"
@@ -253,13 +255,13 @@ class Session(threading.Thread):
                 err_n = 0
             except OSError as e:
                 err_n += 1
-                self.post("status", f"⚠ 읽기 오류 ({err_n}/5): {e}")
+                self.post("status", T("⚠ Read error ({n}/5): {e}").format(n=err_n, e=e))
                 if err_n >= 5:
-                    self.post("fatal", "연결 끊김 — [재연결] 버튼을 사용하세요")
+                    self.post("fatal", T("Disconnected — use the [🔁 Reconnect] button"))
                     self.state = "dead"
                 time.sleep(0.4)
             except Exception as e:
-                self.post("fatal", f"내부 오류: {e}")
+                self.post("fatal", T("Internal error: {e}").format(e=e))
                 self.state = "dead"
         # 종료 정리 — 카메라는 녹화 중일 때만 스트리밍에 응답하므로, 종료 후에도
         # 대시캠 본래 동작(상시 녹화)을 유지하도록 녹화를 다시 켠다.
@@ -302,7 +304,7 @@ class Session(threading.Thread):
                 self.post("files", self.files)
             elif kind == "play":
                 if self.busy:
-                    self.post("status", "⚠ 다운로드 중에는 재생할 수 없습니다")
+                    self.post("status", T("⚠ Cannot play during download"))
                     continue
                 idx, kind_name = data
                 if self.mode == "live":
@@ -346,7 +348,7 @@ class Session(threading.Thread):
                     self.post("playlen", (idx, self.play_len))
             elif kind == "pause":
                 self.cam.pause_playback()
-                self.post("status", "일시정지/재개 토글")
+                self.post("status", T("Pause/Resume toggled"))
             elif kind == "stop":
                 self.cam.stop_playback()
                 self.state = "idle"
@@ -355,7 +357,7 @@ class Session(threading.Thread):
                 self.post("stopped", None)
             elif kind == "delete":
                 if self.mode == "live":
-                    self.post("status", "⚠ 라이브 중에는 삭제할 수 없습니다 — 라이브를 먼저 정지하세요")
+                    self.post("status", T("⚠ Cannot delete during live — stop live first"))
                     continue
                 idx, kind_name = data
                 self.cam.send_command(20, X.file_arg(idx, kind_name))   # cmd 20 = 파일 삭제
@@ -366,7 +368,7 @@ class Session(threading.Thread):
                 self.post("deleted", ((idx, kind_name), not still))
             elif kind == "protect":
                 if self.mode == "live":
-                    self.post("status", "⚠ 라이브 중에는 변경할 수 없습니다 — 라이브를 먼저 정지하세요")
+                    self.post("status", T("⚠ Cannot change while live/recording — stop live first"))
                     continue
                 idx, kind_name = data
                 want_lock = (kind_name != "LOCK")
@@ -396,7 +398,7 @@ class Session(threading.Thread):
 
     def _enter_live(self):
         if self.busy:
-            self.post("status", "⚠ 다운로드 중에는 라이브를 시작할 수 없습니다")
+            self.post("status", T("⚠ Cannot start live during download"))
             return
         if self.mode == "live" and self.state == "live":
             return
@@ -441,7 +443,7 @@ class Session(threading.Thread):
     def _toggle_lrec(self, on):
         if on:
             if self.mode != "live" or self.state != "live":
-                self.post("status", "⚠ 로컬 녹화는 라이브 시작 후에 가능합니다")
+                self.post("status", T("⚠ Local recording requires live view"))
                 return
             if self.live_avi is not None:
                 return
@@ -605,9 +607,9 @@ class Session(threading.Thread):
                 frames, audio = self.cam.download_file(idx, kind_name,
                                                        on_progress=progress)
                 if self.cancel_dl:
-                    self.post("status", "⬇ 취소 — 지금까지 받은 부분을 저장합니다")
+                    self.post("status", T("⬇ Cancelled — saving what was received so far"))
                 if not frames:
-                    self.post("status", f"#{idx:04d}: 프레임 없음 — 건너뜀")
+                    self.post("status", T("{idx:04d}: no frames — skipped").format(idx=idx))
                     skipped.append(idx)
                     continue
                 audio_bytes = sum(len(c) for c in audio)
@@ -639,7 +641,7 @@ class Session(threading.Thread):
 class PlayerUI:
     def __init__(self, root):
         self.root = root
-        root.title("uCarDvr — 라이브 뷰 / 녹화 탐색")
+        root.title(T("uCarDvr — Live View / Recording Browser"))
         root.geometry("960x720")
         self.sess = None
         self.dead = False
@@ -655,11 +657,11 @@ class PlayerUI:
 
         top = tk.Frame(root)
         top.pack(fill="x", padx=6, pady=4)
-        self.status_var = tk.StringVar(value="연결 중...")
+        self.status_var = tk.StringVar(value=T("Connecting..."))
         tk.Label(top, textvariable=self.status_var, anchor="w", bd=1,
                  relief="sunken", font=("Malgun Gothic", 10, "bold"),
                  padx=8).pack(side="left", fill="x", expand=True)
-        self.reconn_btn = tk.Button(top, text="🔁 재연결", state="disabled",
+        self.reconn_btn = tk.Button(top, text=T("🔁 Reconnect"), state="disabled",
                                     command=self.reconnect)
         self.reconn_btn.pack(side="right", padx=4)
 
@@ -667,8 +669,8 @@ class PlayerUI:
         self.notebook.pack(fill="both", expand=True, padx=6, pady=4)
         self.tab_live = tk.Frame(self.notebook)
         self.tab_files = tk.Frame(self.notebook)
-        self.notebook.add(self.tab_live, text="라이브 뷰")
-        self.notebook.add(self.tab_files, text="녹화 탐색")
+        self.notebook.add(self.tab_live, text=T("Live View"))
+        self.notebook.add(self.tab_files, text=T("Recording Browser"))
         self._build_live_tab()
         self._build_files_tab()
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_change)
@@ -687,17 +689,17 @@ class PlayerUI:
                               lambda e: self._canvas_rerender(self.live_canvas))
         row = tk.Frame(f)
         row.pack(fill="x", padx=4, pady=4)
-        self.btn_live = tk.Button(row, text="📹 라이브 시작", width=12,
+        self.btn_live = tk.Button(row, text=T("📹 Start Live"), width=12,
                                   command=self.live_toggle)
-        self.btn_snap = tk.Button(row, text="📷 스냅샷", width=10,
+        self.btn_snap = tk.Button(row, text=T("📷 Snapshot"), width=10,
                                   command=self.snapshot)
-        self.btn_lrec = tk.Button(row, text="🔴 로컬 녹화: 끔", width=16,
+        self.btn_lrec = tk.Button(row, text=T("🔴 Local Rec: Off"), width=16,
                                   command=self.toggle_lrec)
         for b in (self.btn_live, self.btn_snap, self.btn_lrec):
             b.pack(side="left", padx=2)
-        tk.Label(row, text="라이브 뷰에서는 소리가 나오지 않습니다 (녹화된 파일에서는 확인 가능)",
+        tk.Label(row, text=T("Live view has no sound (check recorded files)"),
                  fg="#666").pack(side="right")
-        self._canvas_placeholder(self.live_canvas, "라이브 대기 중")
+        self._canvas_placeholder(self.live_canvas, T("Live standby"))
 
     def _build_files_tab(self):
         f = self.tab_files
@@ -705,23 +707,23 @@ class PlayerUI:
         main.pack(fill="both", expand=True)
 
         # 좌측: 파일 목록 (헤더 클릭으로 정렬 전환)
-        left = tk.LabelFrame(main, text="파일 목록")
+        left = tk.LabelFrame(main, text=T("Files"))
         left.pack(side="left", fill="y", padx=(0, 6))
         btnrow = tk.Frame(left)
         btnrow.pack(fill="x", padx=4, pady=(4, 2))
-        self.refresh_btn = tk.Button(btnrow, text="🔄 갱신", command=self.refresh_list)
+        self.refresh_btn = tk.Button(btnrow, text=T("🔄 Refresh"), command=self.refresh_list)
         self.refresh_btn.pack(side="left", fill="x", expand=True)
-        self.del_btn = tk.Button(btnrow, text="🗑 삭제", command=self.delete_selected)
+        self.del_btn = tk.Button(btnrow, text=T("🗑 Delete"), command=self.delete_selected)
         self.del_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
-        self.protect_btn = tk.Button(btnrow, text="🔒 보호", command=self.toggle_protect)
+        self.protect_btn = tk.Button(btnrow, text=T("🔒 Protect"), command=self.toggle_protect)
         self.protect_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
         inner = tk.Frame(left)
         inner.pack(fill="both", expand=True, padx=4, pady=(0, 4))
         self.sort_key, self.sort_desc = "dt", True   # 기본: 촬영일시 최신 먼저
         self.tree = ttk.Treeview(inner, columns=("num", "dt"), show="headings",
                                  selectmode="browse", height=12)
-        self.tree.heading("num", text="번호", command=lambda: self.sort_by("num"))
-        self.tree.heading("dt", text="촬영일시", command=lambda: self.sort_by("dt"))
+        self.tree.heading("num", text=T("No."), command=lambda: self.sort_by("num"))
+        self.tree.heading("dt", text=T("Date/Time"), command=lambda: self.sort_by("dt"))
         self.tree.column("num", width=86, anchor="w", stretch=False)
         self.tree.column("dt", width=140, anchor="w")
         sb = ttk.Scrollbar(inner, orient="vertical", command=self.tree.yview)
@@ -731,13 +733,13 @@ class PlayerUI:
         self.tree.bind("<Double-Button-1>", lambda e: self.play_selected())
         dlrow = tk.Frame(left)
         dlrow.pack(fill="x", padx=4, pady=(0, 4))
-        self.btn_dl = tk.Button(dlrow, text="📥 선택저장", command=self.download_one)
+        self.btn_dl = tk.Button(dlrow, text=T("📥 Save Selected"), command=self.download_one)
         self.btn_dl.pack(side="left", fill="x", expand=True)
-        self.btn_dlall = tk.Button(dlrow, text="📦 전체저장", command=self.download_all)
+        self.btn_dlall = tk.Button(dlrow, text=T("📦 Save All"), command=self.download_all)
         self.btn_dlall.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         # 우측: 재생 화면
-        right = tk.LabelFrame(main, text="재생 화면 (1280×720)")
+        right = tk.LabelFrame(main, text=T("Playback (1280×720)"))
         right.pack(side="left", fill="both", expand=True)
         self.play_canvas = tk.Canvas(right, bg="black", width=640, height=360,
                                      highlightthickness=0)
@@ -752,21 +754,21 @@ class PlayerUI:
         left = tk.Frame(row)
         left.pack(side="left")
         self.auto_next_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(left, text="다음파일 자동재생",
+        tk.Checkbutton(left, text=T("Auto-play next"),
                        variable=self.auto_next_var).pack(side="left", padx=(2, 8))
         self.repeat_mode = "none"   # none / one / all
-        self.btn_repeat = tk.Button(left, text="🔁 반복: 없음", width=13,
+        self.btn_repeat = tk.Button(left, text=T("🔁 Repeat: Off"), width=13,
                                     command=self.cycle_repeat)
         self.btn_repeat.pack(side="left")
 
         # 중앙: 재생 컨트롤 (좌우 그룹 사이에서 진짜 중앙 정렬)
         mid = tk.Frame(row)
         mid.place(relx=0.5, rely=0.5, anchor="center")
-        self.btn_play = tk.Button(mid, text="🎬 재생", width=8, command=self.play_selected)
-        self.btn_pause = tk.Button(mid, text="🅿️ 일시정지", width=12, command=self.pause)
-        self.btn_stop = tk.Button(mid, text="🛑 정지", width=8, command=self.stop)
-        self.btn_prev = tk.Button(mid, text="🔙 이전", width=8, command=lambda: self.step(-1))
-        self.btn_next = tk.Button(mid, text="다음 🔜", width=8, command=lambda: self.step(1))
+        self.btn_play = tk.Button(mid, text=T("🎬 Play"), width=8, command=self.play_selected)
+        self.btn_pause = tk.Button(mid, text=T("🅿️ Pause"), width=12, command=self.pause)
+        self.btn_stop = tk.Button(mid, text=T("🛑 Stop"), width=8, command=self.stop)
+        self.btn_prev = tk.Button(mid, text=T("🔙 Prev"), width=8, command=lambda: self.step(-1))
+        self.btn_next = tk.Button(mid, text=T("Next 🔜"), width=8, command=lambda: self.step(1))
         for b in (self.btn_play, self.btn_pause, self.btn_stop, self.btn_prev, self.btn_next):
             b.pack(side="left", padx=2)
 
@@ -775,7 +777,7 @@ class PlayerUI:
                                  length=160, command=self.set_volume)
         self.vol_play.set(80)
         self.vol_play.pack(side="right")
-        tk.Label(row, text="볼륨").pack(side="right")
+        tk.Label(row, text=T("Volume")).pack(side="right")
 
         # 재생 위치 슬라이더 — cmd 57(file_arg)로 길이를 확인한 파일에만 표시 (모르면 숨김)
         self.seekrow = tk.Frame(f)
@@ -802,9 +804,9 @@ class PlayerUI:
 
     def on_close(self):
         if messagebox.askyesno(
-                "종료 확인",
-                "프로그램을 종료하고 녹화 모드로 돌아갑니다.\n"
-                "(종료 후에도 카메라가 SD카드에 계속 녹화합니다)\n\n종료할까요?"):
+                T("Exit"),
+                T("The program will exit and the camera returns to recording mode.\n"
+                  "(The camera keeps recording to the SD card.)\n\nExit?")):
             if self.sess:
                 self.sess.cmd("quit", True)
             self.root.after(150, self.root.destroy)
@@ -835,8 +837,9 @@ class PlayerUI:
         else:
             self.sort_key, self.sort_desc = key, True
         self._fill_tree()
-        col = "촬영일시" if key == "dt" else "번호"
-        self.set_status(f"목록 정렬: {col} {'내림' if self.sort_desc else '오름'}차순")
+        col = T("Date/Time") if key == "dt" else T("No.")
+        order = T("descending") if self.sort_desc else T("ascending")
+        self.set_status(T("List sorted: {col} {order}").format(col=col, order=order))
 
     def _fill_tree(self):
         """현재 정렬 기준으로 목록을 다시 그린다. self.rows 자체를 표시 순서로 맞춘다
@@ -846,8 +849,8 @@ class PlayerUI:
         self.rows.sort(key=keyf, reverse=self.sort_desc)
         icon = {"LOCK": "🔒", "PICT": "📷"}
         arrow = " ▼" if self.sort_desc else " ▲"
-        self.tree.heading("num", text=("번호" + arrow) if self.sort_key == "num" else "번호")
-        self.tree.heading("dt", text=("촬영일시" + arrow) if self.sort_key == "dt" else "촬영일시")
+        self.tree.heading("num", text=(T("No.") + arrow) if self.sort_key == "num" else T("No."))
+        self.tree.heading("dt", text=(T("Date/Time") + arrow) if self.sort_key == "dt" else T("Date/Time"))
         for idx, dt, kind_name in self.rows:
             prefix = icon.get(kind_name, "") + " " if kind_name in icon else ""
             self.tree.insert("", "end", values=(f"{prefix}{idx:04d}",
@@ -869,7 +872,7 @@ class PlayerUI:
             idx, _, kind = self.sess.files[0]
             row = (idx, kind)
         if row is None:
-            self.set_status("먼저 목록을 새로고침하세요 (카메라에 SD 필요)")
+            self.set_status(T("First refresh the list (an SD card is required)"))
             return
         self.sess.cmd("play", row)
 
@@ -906,15 +909,15 @@ class PlayerUI:
         idx, _, kind = rows[nxt]
         self.sess.cmd("play", (idx, kind))
 
-    REPEAT_STEPS = (("none", "없음"), ("one", "한 파일"), ("all", "전체"))
+    REPEAT_STEPS = (("none", "Off"), ("one", "One file"), ("all", "All"))
 
     def cycle_repeat(self):
         """반복 토글: 없음 → 한 파일 → 전체 → 없음 … (누를 때마다 순환)"""
         order = [m for m, _ in self.REPEAT_STEPS]
         self.repeat_mode = order[(order.index(self.repeat_mode) + 1) % len(order)]
-        label = dict(self.REPEAT_STEPS)[self.repeat_mode]
-        self.btn_repeat.config(text=f"🔁 반복: {label}")
-        self.set_status(f"반복 재생: {label}")
+        label = T(dict(self.REPEAT_STEPS)[self.repeat_mode])
+        self.btn_repeat.config(text=T("🔁 Repeat: {m}").format(m=label))
+        self.set_status(T("Repeat: {m}").format(m=label))
 
     def _play_neighbor(self, idx, kind_name, delta):
         """끝난 파일 기준 다음(delta=1) 행을 재생. 반복 '전체'면 목록 끝에서 감는다.
@@ -959,16 +962,16 @@ class PlayerUI:
             return
         row = self._selected_row()
         if row is None:
-            self.set_status("삭제할 파일을 목록에서 선택하세요")
+            self.set_status(T("Select a file to delete"))
             return
         idx, kind = row
         if kind == "LOCK":
-            self.set_status(f"🔒 {idx:04d}은(는) 보호된 파일 — 보호 해제 후 삭제할 수 있습니다")
+            self.set_status(T("🔒 {idx:04d} is protected — unlock it before deleting").format(idx=idx))
             return
         ok = messagebox.askyesno(
-            "삭제 확인",
-            f"[{kind} {idx:04d}] 파일을 SD카드에서 삭제할까요?\n\n"
-            "⚠ 되돌릴 수 없습니다.")
+            T("Confirm Delete"),
+            T("[{kind} {idx:04d}] Delete this file from the SD card?\n\n"
+              "⚠ This cannot be undone.").format(kind=kind, idx=idx))
         if ok:
             self.sess.cmd("delete", (idx, kind))
 
@@ -986,12 +989,12 @@ class PlayerUI:
 
     def snapshot(self):
         if self.last_jpeg is None:
-            self.set_status("스냅샷: 저장할 라이브 화면이 없습니다 — 먼저 라이브 시작")
+            self.set_status(T("Snapshot: no live frame — start live first"))
             return
         p = f"SNAP_{stamp()}.jpg"
         with open(p, "wb") as f:
             f.write(self.last_jpeg)
-        self.set_status(f"📸 스냅샷 저장: {p}")
+        self.set_status(T("📸 Snapshot saved: {p}").format(p=p))
 
     def toggle_lrec(self):
         if self.sess is None or self.sess.busy:
@@ -1006,15 +1009,15 @@ class PlayerUI:
             idx, _, kind = self.sess.files[0]
             row = (idx, kind)
         if row is None:
-            self.set_status("목록이 비었습니다")
+            self.set_status(T("The list is empty"))
             return
         idx, kind = row
-        if not messagebox.askyesno("다운로드 확인", self.DL_WARN + "\n진행할까요?"):
+        if not messagebox.askyesno(T("Confirm Download"), T(self.DL_WARN) + T("\nProceed?")):
             return
         path = filedialog.asksaveasfilename(
-            title="저장할 파일 선택",
+            title=T("Save File As"),
             initialfile=f"{kind}{idx:04d}_{stamp()}.avi",
-            defaultextension=".avi", filetypes=[("AVI 동영상", "*.avi")])
+            defaultextension=".avi", filetypes=[(T("AVI video"), "*.avi")])
         if not path:
             return
         self.sess.cancel_dl = False
@@ -1023,11 +1026,11 @@ class PlayerUI:
     def download_all(self):
         if self.sess is None or self.sess.busy or not self.sess.files:
             return
-        msg = (self.DL_WARN + f"\n[전체 다운로드] 목록의 모든 파일 "
-               f"({len(self.sess.files)}개)이 순서대로 캡처됩니다.\n진행할까요?")
-        if not messagebox.askyesno("전체 다운로드 확인", msg):
+        msg = (T(self.DL_WARN) + "\n" + T("[Save All] All {n} files in the list will be "
+               "captured in order.\nProceed?").format(n=len(self.sess.files)))
+        if not messagebox.askyesno(T("Confirm Save All"), msg):
             return
-        folder = filedialog.askdirectory(title="저장할 폴더 선택",
+        folder = filedialog.askdirectory(title=T("Select Folder"),
                                          initialdir="capture" if os.path.isdir("capture") else ".")
         if not folder:
             return
@@ -1039,51 +1042,52 @@ class PlayerUI:
     def cancel_download(self):
         if self.sess:
             self.sess.cancel_dl = True
-            self.set_status("⬇ 취소 요청 — 현재 블록을 마치고 부분 저장합니다")
+            self.set_status(T("⬇ Cancel requested — finishing the current block, then saving partial"))
 
     def notify_download_done(self, saved, skipped, cancelled):
         """다운로드 끝 알림 한 번. 저장 파일은 자동으로 열지 않는다 — 사용자가 직접 재생."""
         if not saved:
-            self.set_status("■ 다운로드 취소 — 저장된 파일 없음" if cancelled
-                            else "⚠ 다운로드 실패 — 저장된 파일 없음")
-            messagebox.showinfo(
-                "다운로드 취소" if cancelled else "다운로드 실패",
-                "취소되어 저장된 파일이 없습니다." if cancelled else
-                f"저장된 파일이 없습니다 (프레임을 받지 못한 파일 {len(skipped)}개).")
+            if cancelled:
+                self.set_status(T("■ Download cancelled — no files saved"))
+                messagebox.showinfo(T("Download Cancelled"), T("Cancelled — no files were saved."))
+            else:
+                self.set_status(T("⚠ Download failed — no files saved"))
+                messagebox.showinfo(T("Download Failed"),
+                                    T("No files saved ({n} skipped without frames).").format(n=len(skipped)))
             return
         n = len(saved)
-        head = (f"취소 — 받은 부분만 저장했습니다 ({n}개 파일)." if cancelled
-                else f"저장 완료 ({n}개 파일).")
+        head = (T("Cancelled — saved partial data ({n} file(s)).").format(n=n) if cancelled
+                else T("Saved ({n} file(s)).").format(n=n))
         if skipped:
-            head += f"\n프레임을 받지 못해 건너뛴 파일 {len(skipped)}개."
-        names = [f"{os.path.basename(p)}{' (부분)' if part else ''}"
+            head += T("\nSkipped {n} file(s) with no frames.").format(n=len(skipped))
+        names = [os.path.basename(p) + (T(" (partial)") if part else "")
                  for p, _, part, _ in saved]
         if len(names) > 10:
-            names = names[:10] + [f"… 외 {n - 10}개"]
+            names = names[:10] + [T("… and {more} more").format(more=n - 10)]
         self.set_status(("■ " if cancelled else "✓ ") + head.splitlines()[0])
         messagebox.showinfo(
-            "다운로드 취소" if cancelled else "다운로드 완료",
-            head + f"\n\n저장 위치: {os.path.dirname(saved[0][0])}"
-            + "".join(f"\n  {nm}" for nm in names))
+            T("Download Cancelled") if cancelled else T("Download Complete"),
+            head + T("\n\nSaved to: {d}").format(d=os.path.dirname(saved[0][0]))
+            + "".join("\n  " + nm for nm in names))
 
     def toggle_protect(self):
         if self.sess is None or self.sess.busy:
             return
         row = self._selected_row()
         if row is None:
-            self.set_status("보호(잠금)/해제할 파일을 목록에서 선택하세요")
+            self.set_status(T("Select a file to protect/unlock"))
             return
         idx, kind = row
         if self.sess.mode == "live":
-            self.set_status("⚠ 라이브/녹화 중에는 변경할 수 없습니다 — 라이브를 먼저 정지하세요")
+            self.set_status(T("⚠ Cannot change while live/recording — stop live first"))
             return
-        action = "해제" if kind == "LOCK" else "잠금(보호)"
-        ok = messagebox.askyesno("보호 변경 확인",
-                                 f"[{kind} {idx:04d}] {action}할까요?")
+        action = T("Unlock") if kind == "LOCK" else T("Lock")
+        ok = messagebox.askyesno(T("Confirm Protect Change"),
+                                 T("[{kind} {idx:04d}] {action}?").format(kind=kind, idx=idx, action=action))
         if ok:
             self.sess.cmd("protect", (idx, kind))
 
-    DL_WARN = "다운로드는 실시간 캡처 방식이라 오래 걸립니다 (녹화 1분 ≈ 2~3분)."
+    DL_WARN = "Downloads capture the live stream in real time, so it takes a while (1 min of recording ≈ 2-3 min)."
     def pump(self):
         s = self.sess
         if s:
@@ -1129,16 +1133,16 @@ class PlayerUI:
 
     def handle_msg(self, kind, data):
         if kind == "ready":
-            self.set_status("연결됨 — 라이브 자동 시작 중...")
+            self.set_status(T("Connected — auto-starting live view..."))
         elif kind == "files":
             self.rows = list(data)
             self._fill_tree()
-            self.set_status(f"목록 {len(data)}개 — 파일 선택 후 ▶ 재생")
+            self.set_status(T("List: {n} files — select one and press ▶ Play").format(n=len(data)))
         elif kind == "playing":
             idx, kind_name = data
             self._drain_display()
-            self._canvas_placeholder(self.play_canvas, "재생 시작 중...")
-            self.set_status(f"▶ 재생 중: {kind_name}{idx:04d}")
+            self._canvas_placeholder(self.play_canvas, T("Starting playback..."))
+            self.set_status(T("▶ Playing: {kind}{idx:04d}").format(kind=kind_name, idx=idx))
             self.notebook.select(self.tab_files)
             self._sync_list_selection(idx, kind_name)
             self._reset_seek()                 # 길이 확인(cmd 57) 전까지 슬라이더 숨김
@@ -1154,79 +1158,82 @@ class PlayerUI:
                 self.seek_lbl.pack(side="right")
         elif kind == "playfail":
             idx, kind_name = data
-            self._canvas_placeholder(self.play_canvas, "재생 대기 중 — 파일 선택 후 ▶")
+            self._canvas_placeholder(self.play_canvas, T("Playback standby — select a file and press ▶"))
             # 자동재생/반복이 켜져 있으면 실패한 파일에서 다음 파일로 넘어간다
             # (연속 실패가 목록 한 바퀴를 넘으면 멈춤 — 무한 루프 방지)
             if (self.auto_next_var.get() or self.repeat_mode != "none") \
                     and self._fail_count < max(1, len(self.rows)) \
                     and self._play_neighbor(idx, kind_name, 1):
                 self._fail_count += 1
-                self.set_status(f"⚠ {kind_name}{idx:04d} 재생 실패 — 다음 파일로 넘어갑니다")
+                self.set_status(T("⚠ {kind}{idx:04d} playback failed — moving to next file").format(kind=kind_name, idx=idx))
             else:
                 self._fail_count = 0
-                self.set_status("⚠ 재생 시작 실패 — 다시 재생해 보세요")
+                self.set_status(T("⚠ Playback failed to start — try again"))
         elif kind == "stopped":
-            self.set_status("정지")
+            self.set_status(T("Stopped"))
         elif kind == "eof":
             idx, kind_name = data
-            ended = f"■ 재생 종료 (파일 끝): {kind_name}{idx:04d}"
+            ended = T("■ Playback finished (end of file): {kind}{idx:04d}").format(kind=kind_name, idx=idx)
             if self.repeat_mode == "one":
-                self.set_status(f"🔁 반복 재생: {kind_name}{idx:04d}")
+                self.set_status(T("🔁 Repeating: {kind}{idx:04d}").format(kind=kind_name, idx=idx))
                 self.sess.cmd("play", (idx, kind_name))
             elif self.repeat_mode == "all" or self.auto_next_var.get():
                 if not self._play_neighbor(idx, kind_name, 1):
-                    self.set_status(ended + " — 목록 끝")
+                    self.set_status(ended + T(" — end of list"))
             else:
                 self.set_status(ended)
         elif kind == "deleted":
             (idx, kind_name), ok = data
             if ok:
-                self.set_status(f"✓ {kind_name}{idx:04d} 삭제 완료 (목록 재조회로 확인)")
+                self.set_status(T("✓ {kind}{idx:04d} deleted (verified by re-listing)").format(kind=kind_name, idx=idx))
             else:
-                self.set_status(f"⚠ {kind_name}{idx:04d}가 여전히 목록에 있음 — cmd 20의 "
-                                f"동작이 삭제가 아닐 수 있음")
+                self.set_status(T("⚠ {kind}{idx:04d} still in the list — cmd 20 may not be "
+                                  "a delete command").format(kind=kind_name, idx=idx))
         elif kind == "protected":
             idx, old_kind, now_kind, _ = data
             if now_kind is None:
-                self.set_status(f"⚠ {idx:04d} 파일이 목록에서 사라짐 — 즉시 확인 바람")
+                self.set_status(T("⚠ {idx:04d} disappeared from the list — check immediately").format(idx=idx))
             elif now_kind != old_kind:
-                self.set_status(f"✓ {idx:04d} → {now_kind} 전환 완료")
+                self.set_status(T("✓ {idx:04d} → {kind} switch complete").format(idx=idx, kind=now_kind))
             else:
-                self.set_status(f"⚠ {idx:04d} 보호 전환 실패")
+                self.set_status(T("⚠ {idx:04d} protect switch failed").format(idx=idx))
         elif kind == "status":
             self.set_status(data)
         elif kind == "live_started":
             self._drain_display()
-            self._canvas_placeholder(self.live_canvas, "라이브 연결 중...")
-            self.btn_live.config(text="🛑 라이브 정지")
-            self.set_status("● 라이브/녹화 진행 중 (SD에 저장되고 있습니다)")
+            self._canvas_placeholder(self.live_canvas, T("Connecting live..."))
+            self.btn_live.config(text=T("🛑 Stop Live"))
+            self.set_status(T("● Live/recording in progress (saving to SD)"))
         elif kind == "live_stopped":
             self._drain_display()
-            self._canvas_placeholder(self.live_canvas, "라이브 대기 중")
-            self.btn_live.config(text="▶ 라이브 시작")
-            self.set_status("■ 라이브/녹화 정지")
+            self._canvas_placeholder(self.live_canvas, T("Live standby"))
+            self.btn_live.config(text=T("▶ Start Live"))
+            self.set_status(T("■ Live/recording stopped"))
         elif kind == "lrec_started":
-            self.btn_lrec.config(text="💾 로컬 녹화: 중지(저장)")
-            self.set_status(f"⏺ 로컬 녹화 시작: {data}")
+            self.btn_lrec.config(text=T("💾 Local Rec: Stop(Save)"))
+            self.set_status(T("⏺ Local recording started: {p}").format(p=data))
         elif kind == "lrec_saved":
-            self.btn_lrec.config(text="⏺ 로컬 녹화: 끔")
-            self.set_status(f"✓ 로컬 녹화 저장: {data}")
+            self.btn_lrec.config(text=T("⏺ Local Rec: Off"))
+            self.set_status(T("✓ Local recording saved: {p}").format(p=data))
         elif kind == "dlstart":
             idx, path = data
             self.dl_var.set(f"⬇ #{idx:04d} → {os.path.basename(path)}")
-            self.set_status(f"⬇ 다운로드 중: #{idx:04d}")
+            self.set_status(T("⬇ Downloading: #{idx:04d}").format(idx=idx))
             self.open_dl_dialog()
         elif kind == "dlprog":
             idx, frames, vbytes, audio_n, elapsed = data
             rate = vbytes / max(elapsed, 0.1) / 1048576
-            self.dl_var.set(f"⬇ #{idx:04d}: {frames}프레임 {vbytes/1048576:.1f}MB "
-                            f"오디오{audio_n}청크 {rate:.1f}MB/s {elapsed:.0f}s")
+            mb = vbytes / 1048576
+            self.dl_var.set(T("⬇ #{idx:04d}: {frames} frames {mb:.1f}MB audio {n} chunks "
+                              "{rate:.1f}MB/s {elapsed:.0f}s").format(idx=idx, frames=frames,
+                              mb=mb, n=audio_n, rate=rate, elapsed=elapsed))
         elif kind == "dldone":
             path, n, total, cancelled, has_audio = data
-            tag = " (취소 — 부분 저장)" if cancelled else ""
-            audio_txt = " · 오디오 포함" if has_audio else ""
-            self.dl_var.set(f"✓ {os.path.basename(path)} ({n}프레임 "
-                            f"{total/1048576:.1f}MB{audio_txt}){tag}")
+            tag = T(" (cancelled — partial)") if cancelled else ""
+            audio_txt = T(" · audio included") if has_audio else ""
+            mb = total / 1048576
+            self.dl_var.set(T("✓ {name} ({n} frames {mb:.1f}MB{audio}){tag}").format(
+                name=os.path.basename(path), n=n, mb=mb, audio=audio_txt, tag=tag))
         elif kind == "dlfinished":
             self.close_dl_dialog()
             if data:                   # None = 오류/종료 중 → 알림 대신 치명 오류 팝업
@@ -1238,25 +1245,24 @@ class PlayerUI:
             self.close_dl_dialog()
             self.reconn_btn.config(state="normal")
             if not was_dead:   # 같은 치명 오류의 팝업 중복 방지
-                messagebox.showerror("카메라 연결 끊김",
-                                     data + "\n\n카메라를 다시 연결한 뒤 "
-                                     "[🔁 재연결] 버튼을 누르세요.")
+                messagebox.showerror(T("Camera Disconnected"),
+                                     data + T("\n\nReconnect the camera, then press [🔁 Reconnect]."))
 
     def open_dl_dialog(self):
         if self.dlg is not None:
             return
         self.dlg = tk.Toplevel(self.root)
-        self.dlg.title("다운로드 진행")
+        self.dlg.title(T("Download Progress"))
         self.dlg.geometry("420x130")
         self.dlg.transient(self.root)
-        tk.Label(self.dlg, text="카메라 스트림을 캡처하는 중...",
+        tk.Label(self.dlg, text=T("Capturing the camera stream..."),
                  anchor="w").pack(fill="x", padx=10, pady=(10, 2))
         bar = ttk.Progressbar(self.dlg, mode="indeterminate", length=380)
         bar.pack(padx=10, pady=4)
         bar.start(60)
         tk.Label(self.dlg, textvariable=self.dl_var, fg="#2060a0",
                  anchor="w", wraplength=390).pack(fill="x", padx=10)
-        tk.Button(self.dlg, text="❌ 취소", width=10,
+        tk.Button(self.dlg, text=T("❌ Cancel"), width=10,
                   command=self.cancel_download).pack(pady=6)
 
     def close_dl_dialog(self):
@@ -1310,14 +1316,14 @@ class PlayerUI:
         if self.sess.busy:
             if target == 0:  # 다운로드는 탐색 탭에서만 진행 — 라이브 전환 차단
                 self.notebook.select(self.tab_files)
-                self.set_status("⚠ 다운로드 중에는 라이브 탭으로 전환할 수 없습니다")
+                self.set_status(T("⚠ Cannot switch to the Live tab during download"))
             return
         self.active_tab = target
         self._drain_display()
         if target == 0:
-            self._canvas_placeholder(self.live_canvas, "라이브 시작 중...")
+            self._canvas_placeholder(self.live_canvas, T("Starting live..."))
         else:
-            self._canvas_placeholder(self.play_canvas, "재생 대기 중 — 파일 선택 후 ▶")
+            self._canvas_placeholder(self.play_canvas, T("Playback standby — select a file and press ▶"))
         want = "live" if target == 0 else "browse"
         if self.sess.mode != want:   # 같은 모드면 재생 중인 state를 건드리지 않음
             self.sess.cmd("mode", want)
@@ -1354,24 +1360,27 @@ def relaunch_as_admin():
 
 
 def main():
+    for i, a in enumerate(sys.argv):
+        if a == "--lang" and i + 1 < len(sys.argv):
+            i18n.set_lang(sys.argv[i + 1])
     root = tk.Tk()
     root.withdraw()
     if not is_admin():
         if messagebox.askyesno(
-                "관리자 권한 필요",
-                "이 프로그램은 카메라(물리 디스크)에 직접 SCSI 명령을 보내므로\n"
-                "관리자 권한이 필요합니다. 권한이 없으면 카메라를 찾지 못합니다.\n\n"
-                "관리자 모드로 다시 실행할까요?"):
+                T("Administrator Required"),
+                T("This program sends SCSI commands directly to the camera (physical disk) and "
+                  "requires administrator rights. Without them the camera cannot be found.\n\n"
+                  "Relaunch as administrator?")):
             if relaunch_as_admin():
                 return 0   # 관리자 인스턴스에 넘기고 현재 창은 닫음
             messagebox.showwarning(
-                "관리자 모드 재실행 실패",
-                "재실행이 취소되었거나 실패했습니다.\n"
-                "일반 모드로 실행하지만 카메라 연결이 실패할 수 있습니다.")
+                T("Relaunch Failed"),
+                T("Relaunch was cancelled or failed.\nRunning in normal mode — the camera "
+                  "connection may fail."))
         else:
             messagebox.showwarning(
-                "관리자 권한 없음",
-                "일반 모드로 실행합니다 — 카메라 연결이 실패할 가능성이 높습니다.")
+                T("Not Running as Administrator"),
+                T("Running in normal mode — the camera connection will likely fail."))
     root.deiconify()
     PlayerUI(root)
     root.mainloop()
